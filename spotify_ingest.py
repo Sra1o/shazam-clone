@@ -36,7 +36,7 @@ async def process_single_track(sp, track_info):
                 title, artist
             )
             if existing:
-                print(f"Skipping '{title}' by {artist}: Already exists in database.")
+                print(f"Skipping '{title}' by {artist}: Already exists in database.", flush=True)
                 return
         
         yt_query = f"{artist} - {title} official audio"
@@ -60,25 +60,25 @@ async def process_single_track(sp, track_info):
                 try:
                     info = await asyncio.to_thread(ydl.extract_info, f"ytsearch1:{yt_query}", download=True)
                 except Exception as e:
-                    print(f"YouTube block detected. Trying YouTube Music...")
+                    print(f"YouTube block detected. Trying YouTube Music...", flush=True)
                     try:
                         info = await asyncio.to_thread(ydl.extract_info, f"ytmsearch1:{yt_query}", download=True)
                     except Exception as e2:
-                        print(f"YouTube Music blocked. Falling back to SoundCloud...")
+                        print(f"YouTube Music blocked. Falling back to SoundCloud...", flush=True)
                         info = await asyncio.to_thread(ydl.extract_info, f"scsearch1:{sc_query}", download=True)
                 
                 if 'entries' in info and len(info['entries']) > 0:
                     downloaded_file = os.path.join(tmpdirname, 'download.wav')
                 else:
-                    print(f"Skipping '{title}': Could not find any audio on YouTube or SoundCloud.")
+                    print(f"Skipping '{title}': Could not find any audio on YouTube or SoundCloud.", flush=True)
                     return
                     
             metadata = SongMetadata(title=title, artist=artist, album=album, duration=duration)
             await ingest_audio_file(downloaded_file, metadata)
-            print(f"Successfully ingested: {title} by {artist}")
+            print(f"Successfully ingested: {title} by {artist}", flush=True)
             
     except Exception as e:
-        print(f"Error processing track {track_info.get('name', 'Unknown')}: {e}")
+        print(f"Error processing track {track_info.get('name', 'Unknown')}: {e}", flush=True)
 
 async def ingest_from_spotify_url(url: str):
     """
@@ -98,7 +98,7 @@ async def ingest_from_spotify_url(url: str):
                 results = sp.next(results)
                 tracks.extend(results['items'])
                 
-            print(f"Starting ingestion of {len(tracks)} tracks from playlist...")
+            print(f"Starting ingestion of {len(tracks)} tracks from playlist...", flush=True)
             
             for item in tracks:
                 track_info = item['track']
@@ -111,7 +111,7 @@ async def ingest_from_spotify_url(url: str):
             await process_single_track(sp, track_info)
             
         else:
-            print("Invalid URL format. Must be a Spotify track or playlist link.")
+            print("Invalid URL format. Must be a Spotify track or playlist link.", flush=True)
             
     except Exception as e:
-        print(f"Critical error in Spotify ingestion task: {e}")
+        print(f"Critical error in Spotify ingestion task: {e}", flush=True)
