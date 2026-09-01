@@ -9,16 +9,16 @@ WINDOW_SIZE = 2048 # Adjusted window size for the lower sample rate
 OVERLAP_RATIO = 0.5
 FAN_VALUE = 15
 MIN_HASH_TIME_DELTA = 10 # Enforce a target zone (at least 10 frames ahead)
-MAX_HASH_TIME_DELTA = 150 # Look up to 150 frames ahead
-PEAK_NEIGHBORHOOD_SIZE = 20 # Keep neighborhood size
+MAX_HASH_TIME_DELTA = 50 # Reduced to 50 to prevent time-drift destruction of hashes
 
-# Frequency bounds for filtering out low-end rumble and high-end hiss
-MIN_FREQ_HZ = 250
-MAX_FREQ_HZ = 3000
+# The 2D Max Filter Neighborhood (Time x Frequency)
+# We use a rectangular neighborhood to force sparseness in time but allow more density in frequency
+PEAK_NEIGHBORHOOD_SIZE_TIME = 20
+PEAK_NEIGHBORHOOD_SIZE_FREQ = 10 
 
-# Number of logarithmic frequency bands to balance peak extraction
-NUM_BANDS = 6
-MIN_AMPLITUDE_PERCENTILE = 80
+# Thresholding constants
+MIN_FREQ_HZ = 250 # High-pass filter to block rumble
+THRESHOLD_OFFSET_DB = 15 # Dynamic threshold: Mean + 15dB
 
 def generate_spectrogram(audio_path, sr=DEFAULT_FS):
     """
@@ -40,58 +40,38 @@ def generate_spectrogram(audio_path, sr=DEFAULT_FS):
 
 def get_2D_peaks(arr2D, sr=DEFAULT_FS, n_fft=WINDOW_SIZE):
     """
-    Applies a 2D max filter to find the highest energy peaks, but strictly limits
-    them to specific frequency bands (250Hz - 3000Hz) to ignore rumble and hiss.
-    Extracts peaks independently per logarithmic frequency band to prevent bass 
-    from dominating the fingerprint.
+    Applies a 2D max filter to find the highest energy peaks.
+    Uses dynamic global thresholding (Mean + 15dB) to prevent noise amplification,
+    and a rectangular filter to ensure peaks are distinct in time.
     """
-    frequencies, times = [], []
-    
     # Calculate frequency per bin
     freq_per_bin = sr / n_fft
     
     # Filter bounds
     min_bin = int(MIN_FREQ_HZ / freq_per_bin)
-    max_bin = int(MAX_FREQ_HZ / freq_per_bin)
     
-    # Ensure max_bin doesn't exceed array shape
-    max_bin = min(max_bin, arr2D.shape[0])
+    # Create a rectangular 2D filter structure (Time x Frequency)
+    # We want it wider in time (20) and shorter in freq (10)
+    neighborhood = np.ones((PEAK_NEIGHBORHOOD_SIZE_TIME, PEAK_NEIGHBORHOOD_SIZE_FREQ))
     
-    # Create logarithmic frequency bands
-    # We want bands that get exponentially larger in higher frequencies (like human hearing)
-    band_edges = np.logspace(np.log10(min_bin), np.log10(max_bin), NUM_BANDS + 1)
-    band_edges = np.round(band_edges).astype(int)
+    # Apply the local maximum filter over the ENTIRE spectrogram
+    local_max = maximum_filter(arr2D, footprint=neighborhood) == arr2D
     
-    neighborhood = np.ones((PEAK_NEIGHBORHOOD_SIZE, PEAK_NEIGHBORHOOD_SIZE))
+    # Dynamic Global Thresholding: Calculate mean across the entire array
+    mean_db = np.mean(arr2D)
+    threshold = mean_db + THRESHOLD_OFFSET_DB
+    threshold_mask = arr2D > threshold
     
-    # Process each band independently
-    for i in range(NUM_BANDS):
-        start_bin = band_edges[i]
-        end_bin = band_edges[i+1]
-        
-        if start_bin >= end_bin:
-            continue
-            
-        band_slice = arr2D[start_bin:end_bin, :]
-        
-        if band_slice.size == 0:
-            continue
-            
-        # Apply local max filter within the band
-        local_max = maximum_filter(band_slice, footprint=neighborhood) == band_slice
-        
-        # Thresholding based on percentile WITHIN THIS BAND ONLY
-        threshold = np.percentile(band_slice, MIN_AMPLITUDE_PERCENTILE)
-        threshold_mask = band_slice > threshold
-        
-        # Get peaks
-        peaks_mask = local_max & threshold_mask
-        band_freqs, band_times = np.where(peaks_mask)
-        
-        # Offset the frequencies back to their global indices
-        frequencies.extend(band_freqs + start_bin)
-        times.extend(band_times)
-        
+    # Ignore frequencies below 250Hz
+    freq_mask = np.ones(arr2D.shape, dtype=bool)
+    freq_mask[:min_bin, :] = False
+    
+    # Get the final valid peaks
+    peaks_mask = local_max & threshold_mask & freq_mask
+    
+    # Get coordinates of peaks (freq_idx, time_idx)
+    frequencies, times = np.where(peaks_mask)
+    
     # Return as list of (time, frequency)
     # We sort by time to facilitate combinatorial hashing
     peaks = list(zip(times, frequencies))
