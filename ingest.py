@@ -5,6 +5,8 @@ from fingerprint import fingerprint_audio
 async def ingest_audio_file(file_path: str, metadata: SongMetadata):
     """
     Fingerprints an audio file and stores metadata and hashes in PostgreSQL.
+    Uses ON CONFLICT to gracefully handle race conditions where two concurrent
+    requests try to insert the same song.
     """
     # 1. Fingerprint the audio
     hashes = fingerprint_audio(file_path)
@@ -13,23 +15,31 @@ async def ingest_audio_file(file_path: str, metadata: SongMetadata):
         raise ValueError("No hashes generated for audio file.")
         
     pool = get_db_pool()
-    # UUIDs in asyncpg can be provided as strings if casted in the query, 
-    # but it's safer to let asyncpg parse the UUID natively or just cast it in SQL.
     song_id = str(uuid.uuid4())
     
     async with pool.acquire() as conn:
         async with conn.transaction():
-            # 2. Insert metadata
-            await conn.execute(
+            # 2. Insert metadata — ON CONFLICT skips if (title, artist) already exists
+            row = await conn.fetchrow(
                 """
-                INSERT INTO songs (id, title, artist, album, duration)
-                VALUES ($1::uuid, $2, $3, $4, $5)
+                INSERT INTO songs (id, title, artist, album, duration, cover_art_url)
+                VALUES ($1::uuid, $2, $3, $4, $5, $6)
+                ON CONFLICT (title, artist) DO NOTHING
+                RETURNING id
                 """,
-                song_id, metadata.title, metadata.artist, metadata.album, metadata.duration
+                song_id, metadata.title, metadata.artist, metadata.album, metadata.duration, metadata.cover_art_url
             )
             
-            # 3. Bulk insert hashes
-            # hashes is a list of (hash_value, offset_in_seconds)
+            if row is None:
+                # Song was already inserted by a concurrent request — look up its id
+                existing = await conn.fetchrow(
+                    "SELECT id FROM songs WHERE title = $1 AND artist = $2",
+                    metadata.title, metadata.artist
+                )
+                print(f"Song '{metadata.title}' by {metadata.artist} already exists (race condition avoided).", flush=True)
+                return str(existing['id']), 0
+            
+            # 3. Bulk insert hashes (only for newly inserted songs)
             hash_records = [(h, song_id, round(offset, 3)) for h, offset in hashes]
             
             await conn.executemany(

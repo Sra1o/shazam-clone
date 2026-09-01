@@ -79,7 +79,7 @@ async def match_audio_snippet(file_path: str):
     if best_song_id:
         async with pool.acquire() as conn:
             song_doc = await conn.fetchrow(
-                "SELECT title, artist, album FROM songs WHERE id = $1::uuid",
+                "SELECT title, artist, album, cover_art_url FROM songs WHERE id = $1::uuid",
                 best_song_id
             )
             
@@ -89,6 +89,7 @@ async def match_audio_snippet(file_path: str):
                     "title": song_doc['title'],
                     "artist": song_doc['artist'],
                     "album": song_doc['album'],
+                    "cover_art_url": song_doc['cover_art_url'],
                     "confidence": best_peak_count,
                     "time_offset": best_delta
                 }

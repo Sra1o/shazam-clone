@@ -42,6 +42,10 @@ async def ingest_from_spotify_url(url: str):
         duration = track_info['duration_ms'] / 1000.0
         preview_url = track_info.get('preview_url')
         
+        # Extract album cover art (Spotify provides multiple sizes, grab the largest)
+        album_images = track_info.get('album', {}).get('images', [])
+        cover_art_url = album_images[0]['url'] if album_images else None
+        
         # 1. Duplicate Safeguard
         pool = get_db_pool()
         async with pool.acquire() as conn:
@@ -51,7 +55,7 @@ async def ingest_from_spotify_url(url: str):
             )
             if existing:
                 print(f"Skipping '{title}' by {artist}: Already exists in database.", flush=True)
-                return existing['id'], 0, SongMetadata(title=title, artist=artist, album=album, duration=duration)
+                return existing['id'], 0, SongMetadata(title=title, artist=artist, album=album, duration=duration, cover_art_url=cover_art_url)
         
         with tempfile.TemporaryDirectory() as tmpdirname:
             
@@ -84,7 +88,7 @@ async def ingest_from_spotify_url(url: str):
                 else:
                     raise ValueError(f"Could not find any DRM-free audio preview for '{title}'.")
                     
-            metadata = SongMetadata(title=title, artist=artist, album=album, duration=duration)
+            metadata = SongMetadata(title=title, artist=artist, album=album, duration=duration, cover_art_url=cover_art_url)
             song_id, num_hashes = await ingest_audio_file(downloaded_file, metadata)
             print(f"Successfully ingested: {title} by {artist}", flush=True)
             

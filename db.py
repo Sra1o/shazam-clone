@@ -15,6 +15,7 @@ class SongMetadata(BaseModel):
     artist: str
     album: Optional[str] = None
     duration: float
+    cover_art_url: Optional[str] = None
 
 async def init_db():
     global pool
@@ -29,8 +30,17 @@ async def init_db():
                 artist VARCHAR(255) NOT NULL,
                 album VARCHAR(255),
                 duration REAL NOT NULL,
+                cover_art_url TEXT,
                 UNIQUE (title, artist)
             );
+
+            -- Add cover_art_url column if it doesn't exist (for existing databases)
+            DO $$
+            BEGIN
+                ALTER TABLE songs ADD COLUMN cover_art_url TEXT;
+            EXCEPTION
+                WHEN duplicate_column THEN NULL;
+            END $$;
             
             CREATE TABLE IF NOT EXISTS hashes (
                 hash_value VARCHAR(8) NOT NULL,
