@@ -3,7 +3,7 @@ import tempfile
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 import yt_dlp
-from db import SongMetadata
+from db import SongMetadata, get_db_pool
 from ingest import ingest_audio_file
 import asyncio
 
@@ -28,6 +28,17 @@ async def process_single_track(sp, track_info):
         album = track_info['album']['name']
         duration = track_info['duration_ms'] / 1000.0
         
+        # 1. Duplicate Safeguard
+        pool = get_db_pool()
+        async with pool.acquire() as conn:
+            existing = await conn.fetchrow(
+                "SELECT id FROM songs WHERE title = $1 AND artist = $2",
+                title, artist
+            )
+            if existing:
+                print(f"Skipping '{title}' by {artist}: Already exists in database.")
+                return
+        
         search_query = f"{artist} - {title} official audio"
         
         ydl_opts = {
@@ -44,8 +55,12 @@ async def process_single_track(sp, track_info):
             ydl_opts['outtmpl'] = os.path.join(tmpdirname, 'download.%(ext)s')
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # Run the synchronous yt-dlp download in a thread to avoid blocking the async event loop
-                info = await asyncio.to_thread(ydl.extract_info, f"ytsearch1:{search_query}", download=True)
+                try:
+                    info = await asyncio.to_thread(ydl.extract_info, f"ytsearch1:{search_query}", download=True)
+                except Exception as e:
+                    print(f"YouTube blocked the request (Bot Check). Falling back to SoundCloud...")
+                    # Fallback to SoundCloud search which rarely blocks datacenter IPs
+                    info = await asyncio.to_thread(ydl.extract_info, f"scsearch1:{search_query}", download=True)
                 
                 if 'entries' in info and len(info['entries']) > 0:
                     downloaded_file = os.path.join(tmpdirname, 'download.wav')
