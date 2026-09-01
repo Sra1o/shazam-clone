@@ -1,0 +1,30 @@
+services:
+  - type: redis
+    name: shazam-redis
+    plan: free
+    ipAllowList: [] # Limits access to only services on Render
+
+  - type: web
+    name: shazam-backend
+    env: docker
+    plan: free
+    envVars:
+      - key: REDIS_URI
+        fromService:
+          type: redis
+          name: shazam-redis
+          property: connectionString
+      - key: MONGO_URI
+        sync: false # You must set this manually in the Render Dashboard (from MongoDB Atlas)
+      - key: PYTHONUNBUFFERED
+        value: "1"
+
+  - type: web
+    name: shazam-frontend
+    env: static
+    plan: free
+    buildCommand: "cd frontend && npm install && npm run build"
+    staticPublishPath: "./frontend/dist"
+    envVars:
+      - key: VITE_API_URL
+        sync: false # You must set this manually to your backend's URL (e.g., https://shazam-backend-xxx.onrender.com)

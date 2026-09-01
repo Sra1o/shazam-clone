@@ -1,0 +1,9 @@
+numpy
+scipy
+librosa
+motor
+redis
+pydantic
+fastapi
+uvicorn
+python-multipart
