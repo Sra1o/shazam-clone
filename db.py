@@ -28,7 +28,8 @@ async def init_db():
                 title VARCHAR(255) NOT NULL,
                 artist VARCHAR(255) NOT NULL,
                 album VARCHAR(255),
-                duration REAL NOT NULL
+                duration REAL NOT NULL,
+                UNIQUE (title, artist)
             );
             
             CREATE TABLE IF NOT EXISTS hashes (

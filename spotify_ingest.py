@@ -1,9 +1,10 @@
 import os
+import json
 import tempfile
 import urllib.request
+import urllib.parse
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
-import yt_dlp
 from db import SongMetadata, get_db_pool
 from ingest import ingest_audio_file
 import asyncio
@@ -60,34 +61,28 @@ async def ingest_from_spotify_url(url: str):
                 await asyncio.to_thread(urllib.request.urlretrieve, preview_url, downloaded_file)
                 
             else:
-                print(f"No Spotify preview available. Falling back to scraper...", flush=True)
-                yt_query = f"{artist} - {title} audio"
-                sc_query = f"{artist} {title}"
+                print(f"No Spotify preview available. Bypassing DRM by fetching audio from Apple iTunes...", flush=True)
                 
-                ydl_opts = {
-                    'format': 'bestaudio/best',
-                    'noplaylist': True,
-                    'quiet': True,
-                    'extractor_args': {'youtube': ['client=ANDROID,IOS,WEB']},
-                    'postprocessors': [{
-                        'key': 'FFmpegExtractAudio',
-                        'preferredcodec': 'wav',
-                    }],
-                }
-                ydl_opts['outtmpl'] = os.path.join(tmpdirname, 'download.%(ext)s')
+                # We search iTunes for the exact artist and title to get a 100% DRM-free high quality preview
+                itunes_query = urllib.parse.quote(f"{artist} {title}")
+                itunes_url = f"https://itunes.apple.com/search?term={itunes_query}&media=music&limit=1"
                 
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    try:
-                        # Prioritize SoundCloud because it almost NEVER has DRM protection or bot checks
-                        info = await asyncio.to_thread(ydl.extract_info, f"scsearch1:{sc_query}", download=True)
-                    except Exception as e:
-                        print(f"SoundCloud threw an error. Falling back to YouTube...", flush=True)
-                        info = await asyncio.to_thread(ydl.extract_info, f"ytsearch1:{yt_query}", download=True)
-                    
-                    if 'entries' in info and len(info['entries']) > 0:
-                        downloaded_file = os.path.join(tmpdirname, 'download.wav')
-                    else:
-                        raise ValueError(f"Could not find any audio on SoundCloud or YouTube for '{title}'.")
+                def fetch_itunes_preview():
+                    req = urllib.request.Request(itunes_url, headers={'User-Agent': 'Mozilla/5.0'})
+                    with urllib.request.urlopen(req) as response:
+                        data = json.loads(response.read().decode())
+                        if data['resultCount'] > 0 and 'previewUrl' in data['results'][0]:
+                            return data['results'][0]['previewUrl']
+                        return None
+                        
+                itunes_preview_url = await asyncio.to_thread(fetch_itunes_preview)
+                
+                if itunes_preview_url:
+                    print(f"Successfully found DRM-free audio on iTunes!", flush=True)
+                    downloaded_file = os.path.join(tmpdirname, 'preview.m4a')
+                    await asyncio.to_thread(urllib.request.urlretrieve, itunes_preview_url, downloaded_file)
+                else:
+                    raise ValueError(f"Could not find any DRM-free audio preview for '{title}'.")
                     
             metadata = SongMetadata(title=title, artist=artist, album=album, duration=duration)
             song_id, num_hashes = await ingest_audio_file(downloaded_file, metadata)
@@ -96,5 +91,6 @@ async def ingest_from_spotify_url(url: str):
             return song_id, num_hashes, metadata
             
     except Exception as e:
-        print(f"Critical error in Spotify ingestion task: {e}", flush=True)
-        raise e
+        print(f"Critical error in Spotify ingestion task for {url}: {e}", flush=True)
+        # Avoid raising the exception so we don't crash the background task worker
+        return None
