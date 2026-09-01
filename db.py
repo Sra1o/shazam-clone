@@ -33,14 +33,6 @@ async def init_db():
                 cover_art_url TEXT,
                 UNIQUE (title, artist)
             );
-
-            -- Add cover_art_url column if it doesn't exist (for existing databases)
-            DO $$
-            BEGIN
-                ALTER TABLE songs ADD COLUMN cover_art_url TEXT;
-            EXCEPTION
-                WHEN duplicate_column THEN NULL;
-            END $$;
             
             CREATE TABLE IF NOT EXISTS hashes (
                 hash_value VARCHAR(8) NOT NULL,
@@ -54,6 +46,12 @@ async def init_db():
             -- Optional: Index on song_id for fast deletion/management
             CREATE INDEX IF NOT EXISTS idx_hashes_song_id ON hashes (song_id);
         """)
+        
+        # Migration: add cover_art_url to existing databases that don't have it yet
+        try:
+            await conn.execute("ALTER TABLE songs ADD COLUMN cover_art_url TEXT;")
+        except asyncpg.exceptions.DuplicateColumnError:
+            pass  # Column already exists, nothing to do
 
 async def close_db():
     if pool:
