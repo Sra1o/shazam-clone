@@ -71,7 +71,8 @@ async def identify_endpoint(file: UploadFile = File(...)):
     """
     # Save uploaded file temporarily. 
     # Note: librosa can read many formats out-of-the-box, but ffmpeg might be required for some (like webm).
-    with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+    # Providing the .webm suffix helps ffmpeg/soundfile identify the format correctly.
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as temp_file:
         content = await file.read()
         temp_file.write(content)
         temp_path = temp_file.name

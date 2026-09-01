@@ -69,7 +69,12 @@ function App() {
       });
 
       if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
+        let errDetail = 'Unknown error';
+        try {
+          const errData = await response.json();
+          errDetail = errData.detail || errDetail;
+        } catch (e) {}
+        throw new Error(`API error: ${response.status} - ${errDetail}`);
       }
 
       const data = await response.json();
