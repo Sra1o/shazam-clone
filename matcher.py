@@ -51,10 +51,19 @@ async def match_audio_snippet(file_path: str):
         query_offsets = hash_to_query_offsets[db_hash]
         
         for q_offset in query_offsets:
+            # We now keep the delta in integer frames (or very close to it since we changed to seconds)
+            # Wait, fingerprint.py still returns offsets in seconds! Let's convert back to frames for integer bucketing, 
+            # or just bucket by rounding to the nearest 0.05s which is roughly 1 frame.
+            # 1 frame at 11025Hz with 2048 window (50% overlap) = 1024 samples / 11025 Hz = 0.0928 seconds
             delta = db_offset - q_offset
-            # Bucket to nearest 0.25s for tighter alignment (was 0.5s)
-            bucketed_delta = round(delta * 4) / 4
-            song_delta_counts[song_id][bucketed_delta] += 1
+            
+            # Bucket to nearest frame (approx 0.093s). We divide by 0.093 to get the frame index.
+            frame_delta = int(round(delta / 0.0928798))
+            
+            # Fuzzy match: add to the exact frame, and adjacent frames to handle jitter
+            song_delta_counts[song_id][frame_delta] += 1
+            song_delta_counts[song_id][frame_delta - 1] += 1
+            song_delta_counts[song_id][frame_delta + 1] += 1
             
     # 4. Find the best matches
     scored_songs = []

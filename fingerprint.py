@@ -4,14 +4,21 @@ from scipy.ndimage import maximum_filter
 import hashlib
 
 # Configuration constants
-DEFAULT_FS = 22050
-WINDOW_SIZE = 4096
+DEFAULT_FS = 11025 # Downsampled for robustness against pitch variations
+WINDOW_SIZE = 2048 # Adjusted window size for the lower sample rate
 OVERLAP_RATIO = 0.5
-FAN_VALUE = 15 # Restored to 15 to ensure enough hashes are generated despite noise
-MIN_HASH_TIME_DELTA = 0
-MAX_HASH_TIME_DELTA = 100 # Keep at 100 for time precision
-PEAK_NEIGHBORHOOD_SIZE = 20 # Restored to 20 to allow more peaks (vital for short mic recordings)
-MIN_AMPLITUDE_PERCENTILE = 80 # Lowered from 90 to 80 to keep more peaks, ensuring robustness to noise
+FAN_VALUE = 15
+MIN_HASH_TIME_DELTA = 10 # Enforce a target zone (at least 10 frames ahead)
+MAX_HASH_TIME_DELTA = 150 # Look up to 150 frames ahead
+PEAK_NEIGHBORHOOD_SIZE = 20 # Keep neighborhood size
+
+# Frequency bounds for filtering out low-end rumble and high-end hiss
+MIN_FREQ_HZ = 250
+MAX_FREQ_HZ = 3000
+
+# Number of logarithmic frequency bands to balance peak extraction
+NUM_BANDS = 6
+MIN_AMPLITUDE_PERCENTILE = 80
 
 def generate_spectrogram(audio_path, sr=DEFAULT_FS):
     """
@@ -31,28 +38,60 @@ def generate_spectrogram(audio_path, sr=DEFAULT_FS):
     
     return spectrogram, sr, hop_length
 
-def get_2D_peaks(arr2D):
+def get_2D_peaks(arr2D, sr=DEFAULT_FS, n_fft=WINDOW_SIZE):
     """
-    Applies a 2D max filter to find the highest energy peaks.
-    Uses a larger neighborhood and stricter threshold to produce fewer,
-    more distinctive peaks — critical for accuracy at scale.
+    Applies a 2D max filter to find the highest energy peaks, but strictly limits
+    them to specific frequency bands (250Hz - 3000Hz) to ignore rumble and hiss.
+    Extracts peaks independently per logarithmic frequency band to prevent bass 
+    from dominating the fingerprint.
     """
-    # Create a 2D filter structure
+    frequencies, times = [], []
+    
+    # Calculate frequency per bin
+    freq_per_bin = sr / n_fft
+    
+    # Filter bounds
+    min_bin = int(MIN_FREQ_HZ / freq_per_bin)
+    max_bin = int(MAX_FREQ_HZ / freq_per_bin)
+    
+    # Ensure max_bin doesn't exceed array shape
+    max_bin = min(max_bin, arr2D.shape[0])
+    
+    # Create logarithmic frequency bands
+    # We want bands that get exponentially larger in higher frequencies (like human hearing)
+    band_edges = np.logspace(np.log10(min_bin), np.log10(max_bin), NUM_BANDS + 1)
+    band_edges = np.round(band_edges).astype(int)
+    
     neighborhood = np.ones((PEAK_NEIGHBORHOOD_SIZE, PEAK_NEIGHBORHOOD_SIZE))
     
-    # Apply the local maximum filter
-    local_max = maximum_filter(arr2D, footprint=neighborhood) == arr2D
-    
-    # Thresholding based on percentile to be robust across different audio volumes
-    threshold = np.percentile(arr2D, MIN_AMPLITUDE_PERCENTILE)
-    threshold_mask = arr2D > threshold
-    
-    # Get the peaks (no need for background mask with dB spectrogram — silence is already very negative)
-    peaks_mask = local_max & threshold_mask
-    
-    # Get coordinates of peaks (freq_idx, time_idx)
-    frequencies, times = np.where(peaks_mask)
-    
+    # Process each band independently
+    for i in range(NUM_BANDS):
+        start_bin = band_edges[i]
+        end_bin = band_edges[i+1]
+        
+        if start_bin >= end_bin:
+            continue
+            
+        band_slice = arr2D[start_bin:end_bin, :]
+        
+        if band_slice.size == 0:
+            continue
+            
+        # Apply local max filter within the band
+        local_max = maximum_filter(band_slice, footprint=neighborhood) == band_slice
+        
+        # Thresholding based on percentile WITHIN THIS BAND ONLY
+        threshold = np.percentile(band_slice, MIN_AMPLITUDE_PERCENTILE)
+        threshold_mask = band_slice > threshold
+        
+        # Get peaks
+        peaks_mask = local_max & threshold_mask
+        band_freqs, band_times = np.where(peaks_mask)
+        
+        # Offset the frequencies back to their global indices
+        frequencies.extend(band_freqs + start_bin)
+        times.extend(band_times)
+        
     # Return as list of (time, frequency)
     # We sort by time to facilitate combinatorial hashing
     peaks = list(zip(times, frequencies))
@@ -102,7 +141,7 @@ def fingerprint_audio(audio_path):
     Returns: list of (hash_value, offset_in_seconds) tuples
     """
     spectrogram, sr, hop_length = generate_spectrogram(audio_path)
-    peaks = get_2D_peaks(spectrogram)
+    peaks = get_2D_peaks(spectrogram, sr)
     hashes = generate_hashes(peaks)
     
     # Convert frame offsets to seconds for better interpretability and robustness
