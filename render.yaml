@@ -1,21 +1,15 @@
 services:
-  - type: redis
-    name: shazam-redis
-    plan: free
-    ipAllowList: [] # Limits access to only services on Render
-
   - type: web
     name: shazam-backend
     env: docker
     plan: free
     envVars:
-      - key: REDIS_URI
-        fromService:
-          type: redis
-          name: shazam-redis
-          property: connectionString
-      - key: MONGO_URI
-        sync: false # You must set this manually in the Render Dashboard (from MongoDB Atlas)
+      - key: DATABASE_URL
+        sync: false # Set this to your PostgreSQL connection string (e.g., from Neon, Supabase, or Render Postgres)
+      - key: SPOTIPY_CLIENT_ID
+        sync: false # Get this from Spotify Developer Dashboard
+      - key: SPOTIPY_CLIENT_SECRET
+        sync: false # Get this from Spotify Developer Dashboard
       - key: PYTHONUNBUFFERED
         value: "1"
 
@@ -27,4 +21,4 @@ services:
     staticPublishPath: "./frontend/dist"
     envVars:
       - key: VITE_API_URL
-        sync: false # You must set this manually to your backend's URL (e.g., https://shazam-backend-xxx.onrender.com)
+        sync: false # Set this manually to your backend's URL

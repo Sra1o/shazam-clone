@@ -6,6 +6,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from db import init_db, close_db, SongMetadata
 from ingest import ingest_audio_file
 from matcher import match_audio_snippet
+from spotify_ingest import ingest_from_spotify
+from pydantic import BaseModel
+
+class SpotifyRequest(BaseModel):
+    url: str
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -62,6 +67,24 @@ async def ingest_endpoint(
         "song_id": song_id,
         "hashes_generated": num_hashes,
         "message": f"Successfully ingested '{title}' by {artist}"
+    }
+
+@app.post("/ingest/spotify")
+async def ingest_spotify_endpoint(request: SpotifyRequest):
+    """
+    Endpoint to automatically ingest a song using a Spotify track URL.
+    Downloads the audio from YouTube in the background.
+    """
+    try:
+        song_id, num_hashes, metadata = await ingest_from_spotify(request.url)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+        
+    return {
+        "status": "success",
+        "song_id": song_id,
+        "hashes_generated": num_hashes,
+        "message": f"Successfully ingested '{metadata.title}' by {metadata.artist}"
     }
 
 @app.post("/identify")

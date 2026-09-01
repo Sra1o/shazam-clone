@@ -1,74 +1,54 @@
 import os
-from motor.motor_asyncio import AsyncIOMotorClient
-import redis.asyncio as redis
-from pydantic import BaseModel, Field
+import asyncpg
+from pydantic import BaseModel
 from typing import Optional
 
 # Environment variables or defaults
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-REDIS_URI = os.getenv("REDIS_URI", "redis://localhost:6379")
+DATABASE_URL = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or "postgresql://postgres:postgres@localhost:5432/shazam"
 
-# Global clients
-mongo_client = None
-db = None
-redis_client = None
+# Global pool
+pool = None
 
-# --- MongoDB Schemas (Metadata) ---
-
+# Pydantic Schemas for API
 class SongMetadata(BaseModel):
-    """
-    Schema for storing song metadata in MongoDB.
-    """
     title: str
     artist: str
     album: Optional[str] = None
-    duration: float  # Duration in seconds
-
-class SongInDB(SongMetadata):
-    """
-    Schema representing a song document as stored in MongoDB.
-    """
-    id: str = Field(alias="_id")
-
-
-# --- Database Connection Management ---
+    duration: float
 
 async def init_db():
-    """
-    Initialize connections to MongoDB and Redis.
-    Should be called on application startup.
-    """
-    global mongo_client, db, redis_client
+    global pool
+    pool = await asyncpg.create_pool(DATABASE_URL)
     
-    # 1. Initialize MongoDB connection (Motor)
-    mongo_client = AsyncIOMotorClient(MONGO_URI)
-    db = mongo_client.shazam_clone
-    
-    # Optional: Create indexes (e.g., on title/artist if we want to search later)
-    # await db.songs.create_index([("title", 1), ("artist", 1)])
-    
-    # 2. Initialize Redis connection pool
-    # decode_responses=True ensures we get strings back instead of bytes
-    redis_client = redis.from_url(REDIS_URI, decode_responses=True)
+    # Initialize schema
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS songs (
+                id UUID PRIMARY KEY,
+                title VARCHAR(255) NOT NULL,
+                artist VARCHAR(255) NOT NULL,
+                album VARCHAR(255),
+                duration REAL NOT NULL
+            );
+            
+            CREATE TABLE IF NOT EXISTS hashes (
+                hash_value VARCHAR(8) NOT NULL,
+                song_id UUID NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+                time_offset REAL NOT NULL
+            );
+            
+            -- Create a B-Tree index on hash_value for extremely fast matching
+            CREATE INDEX IF NOT EXISTS idx_hashes_hash_value ON hashes (hash_value);
+            
+            -- Optional: Index on song_id for fast deletion/management
+            CREATE INDEX IF NOT EXISTS idx_hashes_song_id ON hashes (song_id);
+        """)
 
 async def close_db():
-    """
-    Close database connections gracefully.
-    Should be called on application shutdown.
-    """
-    if mongo_client:
-        mongo_client.close()
-    if redis_client:
-        await redis_client.aclose()
+    if pool:
+        await pool.close()
 
-def get_redis():
-    """
-    Dependency to get the Redis client.
-    """
-    return redis_client
-
-def get_db():
-    """
-    Dependency to get the MongoDB database instance.
-    """
-    return db
+def get_db_pool():
+    if pool is None:
+        raise RuntimeError("Database pool not initialized")
+    return pool

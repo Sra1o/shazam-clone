@@ -27,10 +27,11 @@ function App() {
 
       mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        await sendAudioToAPI(audioBlob);
         
-        // Stop all tracks to release microphone
+        // Stop all tracks immediately to release microphone
         stream.getTracks().forEach(track => track.stop());
+        
+        await sendAudioToAPI(audioBlob);
       };
 
       mediaRecorder.start();

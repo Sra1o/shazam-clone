@@ -1,9 +1,10 @@
 numpy
 scipy
 librosa
-motor
-redis
 pydantic
 fastapi
 uvicorn
 python-multipart
+asyncpg
+spotipy
+yt-dlp
