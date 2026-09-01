@@ -180,7 +180,7 @@ function App() {
           <input
             type="text"
             className="spotify-input"
-            placeholder="Paste Spotify Track or Playlist link..."
+            placeholder="Paste a Spotify Track link..."
             value={spotifyUrl}
             onChange={(e) => setSpotifyUrl(e.target.value)}
             disabled={ingestStatus === 'loading'}

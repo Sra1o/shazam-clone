@@ -1,5 +1,6 @@
 import os
 import tempfile
+import urllib.request
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 import yt_dlp
@@ -38,6 +39,7 @@ async def ingest_from_spotify_url(url: str):
         artist = track_info['artists'][0]['name']
         album = track_info['album']['name']
         duration = track_info['duration_ms'] / 1000.0
+        preview_url = track_info.get('preview_url')
         
         # 1. Duplicate Safeguard
         pool = get_db_pool()
@@ -50,36 +52,42 @@ async def ingest_from_spotify_url(url: str):
                 print(f"Skipping '{title}' by {artist}: Already exists in database.", flush=True)
                 return existing['id'], 0, SongMetadata(title=title, artist=artist, album=album, duration=duration)
         
-        # We search exactly what we need
-        yt_query = f"{artist} - {title} audio"
-        sc_query = f"{artist} {title}"
-        
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'noplaylist': True,
-            'quiet': True,
-            # 'ANDROID' without 'ANDROID_MUSIC' bypasses bot checks without triggering Music DRM!
-            'extractor_args': {'youtube': ['client=ANDROID,IOS,WEB']},
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'wav',
-            }],
-        }
-        
         with tempfile.TemporaryDirectory() as tmpdirname:
-            ydl_opts['outtmpl'] = os.path.join(tmpdirname, 'download.%(ext)s')
             
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                try:
-                    info = await asyncio.to_thread(ydl.extract_info, f"ytsearch1:{yt_query}", download=True)
-                except Exception as e:
-                    print(f"YouTube threw an error (Bot/DRM). Falling back to SoundCloud...", flush=True)
-                    info = await asyncio.to_thread(ydl.extract_info, f"scsearch1:{sc_query}", download=True)
+            if preview_url:
+                print(f"Found Spotify preview URL! Downloading directly from Spotify servers...", flush=True)
+                downloaded_file = os.path.join(tmpdirname, 'preview.mp3')
+                await asyncio.to_thread(urllib.request.urlretrieve, preview_url, downloaded_file)
                 
-                if 'entries' in info and len(info['entries']) > 0:
-                    downloaded_file = os.path.join(tmpdirname, 'download.wav')
-                else:
-                    raise ValueError(f"Could not find any audio on YouTube or SoundCloud for '{title}'.")
+            else:
+                print(f"No Spotify preview available. Falling back to scraper...", flush=True)
+                yt_query = f"{artist} - {title} audio"
+                sc_query = f"{artist} {title}"
+                
+                ydl_opts = {
+                    'format': 'bestaudio/best',
+                    'noplaylist': True,
+                    'quiet': True,
+                    'extractor_args': {'youtube': ['client=ANDROID,IOS,WEB']},
+                    'postprocessors': [{
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': 'wav',
+                    }],
+                }
+                ydl_opts['outtmpl'] = os.path.join(tmpdirname, 'download.%(ext)s')
+                
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    try:
+                        # Prioritize SoundCloud because it almost NEVER has DRM protection or bot checks
+                        info = await asyncio.to_thread(ydl.extract_info, f"scsearch1:{sc_query}", download=True)
+                    except Exception as e:
+                        print(f"SoundCloud threw an error. Falling back to YouTube...", flush=True)
+                        info = await asyncio.to_thread(ydl.extract_info, f"ytsearch1:{yt_query}", download=True)
+                    
+                    if 'entries' in info and len(info['entries']) > 0:
+                        downloaded_file = os.path.join(tmpdirname, 'download.wav')
+                    else:
+                        raise ValueError(f"Could not find any audio on SoundCloud or YouTube for '{title}'.")
                     
             metadata = SongMetadata(title=title, artist=artist, album=album, duration=duration)
             song_id, num_hashes = await ingest_audio_file(downloaded_file, metadata)
