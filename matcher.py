@@ -6,6 +6,7 @@ async def match_audio_snippet(file_path: str):
     """
     Fingerprints a query audio file, searches PostgreSQL for matches,
     aligns the offsets, and finds the best matching song.
+    Uses relative confidence scoring to avoid false positives at scale.
     """
     # 1. Fingerprint the query audio
     query_hashes = fingerprint_audio(file_path)
@@ -50,14 +51,15 @@ async def match_audio_snippet(file_path: str):
         
         for q_offset in query_offsets:
             delta = db_offset - q_offset
-            # Bucket to nearest 0.5s for recording robustness
-            bucketed_delta = round(delta * 2) / 2
+            # Bucket to nearest 0.25s for tighter alignment (was 0.5s)
+            bucketed_delta = round(delta * 4) / 4
             song_delta_counts[song_id][bucketed_delta] += 1
             
-    # 4. Find the best match
+    # 4. Find the best and second-best matches
     best_song_id = None
     best_peak_count = 0
     best_delta = 0
+    second_best_peak_count = 0
     
     for song_id, delta_histogram in song_delta_counts.items():
         if not delta_histogram:
@@ -67,12 +69,21 @@ async def match_audio_snippet(file_path: str):
         peak_count = delta_histogram[max_delta]
         
         if peak_count > best_peak_count:
+            # Demote the current best to second-best
+            second_best_peak_count = best_peak_count
             best_peak_count = peak_count
             best_song_id = song_id
             best_delta = max_delta
+        elif peak_count > second_best_peak_count:
+            second_best_peak_count = peak_count
             
-    # Confidence threshold
-    if best_peak_count < 3:
+    # Absolute confidence threshold — need at least 8 aligned hits (was 3)
+    if best_peak_count < 8:
+        return None
+    
+    # Relative confidence check — best must be at least 2x the runner-up
+    # This prevents false positives when random collisions spread evenly across songs
+    if second_best_peak_count > 0 and best_peak_count < (second_best_peak_count * 2):
         return None
         
     # 5. Fetch song metadata from PostgreSQL

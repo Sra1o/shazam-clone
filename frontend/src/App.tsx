@@ -5,6 +5,7 @@ function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [result, setResult] = useState<any>(null);
+  const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
   // Spotify Ingestion State
@@ -18,6 +19,7 @@ function App() {
   const startRecording = async () => {
     try {
       setResult(null);
+      setNotFound(false);
       setError(null);
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
@@ -88,7 +90,7 @@ function App() {
       if (data.status === 'success') {
         setResult(data.match);
       } else {
-        setError('No match found. Try again!');
+        setNotFound(true);
       }
     } catch (err: any) {
       console.error(err);
@@ -163,6 +165,21 @@ function App() {
       {error && (
         <div className="error-message">
           {error}
+        </div>
+      )}
+
+      {notFound && (
+        <div className="not-found-card">
+          <div className="not-found-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 18V5l12-2v13"/>
+              <circle cx="6" cy="18" r="3"/>
+              <circle cx="18" cy="16" r="3"/>
+              <line x1="2" y1="2" x2="22" y2="22" strokeWidth="2"/>
+            </svg>
+          </div>
+          <div className="not-found-title">Song not recognized</div>
+          <div className="not-found-subtitle">Try recording a louder or clearer snippet, or add the song using a Spotify link below.</div>
         </div>
       )}
 

@@ -7,15 +7,17 @@ import hashlib
 DEFAULT_FS = 22050
 WINDOW_SIZE = 4096
 OVERLAP_RATIO = 0.5
-FAN_VALUE = 15 # Max number of targets per anchor
+FAN_VALUE = 10 # Max number of targets per anchor (reduced from 15 for fewer collisions)
 MIN_HASH_TIME_DELTA = 0
-MAX_HASH_TIME_DELTA = 200 # Target window length in frames
-PEAK_NEIGHBORHOOD_SIZE = 20 # Size of the neighborhood for the 2D max filter
-MIN_AMPLITUDE_PERCENTILE = 75 # Minimum amplitude percentile for a peak
+MAX_HASH_TIME_DELTA = 100 # Target window length in frames (tightened from 200)
+PEAK_NEIGHBORHOOD_SIZE = 35 # Size of the neighborhood for the 2D max filter (increased from 20)
+MIN_AMPLITUDE_PERCENTILE = 90 # Minimum amplitude percentile for a peak (raised from 75)
 
 def generate_spectrogram(audio_path, sr=DEFAULT_FS):
     """
-    Loads audio, converts to mono, resamples, and computes the spectrogram.
+    Loads audio, converts to mono, resamples, and computes a log-power spectrogram.
+    Using log-power (dB) instead of raw magnitude makes peak detection robust
+    across different recording volumes and environments.
     """
     y, sr = librosa.load(audio_path, sr=sr, mono=True)
     
@@ -23,14 +25,17 @@ def generate_spectrogram(audio_path, sr=DEFAULT_FS):
     hop_length = int(WINDOW_SIZE * (1 - OVERLAP_RATIO))
     stft = librosa.stft(y, n_fft=WINDOW_SIZE, hop_length=hop_length)
     
-    # Get magnitude spectrogram
-    spectrogram = np.abs(stft)
+    # Convert to log-power spectrogram (dB scale) for dynamic range compression
+    # This makes peak detection much more robust across different volumes
+    spectrogram = librosa.amplitude_to_db(np.abs(stft), ref=np.max)
     
     return spectrogram, sr, hop_length
 
 def get_2D_peaks(arr2D):
     """
     Applies a 2D max filter to find the highest energy peaks.
+    Uses a larger neighborhood and stricter threshold to produce fewer,
+    more distinctive peaks — critical for accuracy at scale.
     """
     # Create a 2D filter structure
     neighborhood = np.ones((PEAK_NEIGHBORHOOD_SIZE, PEAK_NEIGHBORHOOD_SIZE))
@@ -38,15 +43,12 @@ def get_2D_peaks(arr2D):
     # Apply the local maximum filter
     local_max = maximum_filter(arr2D, footprint=neighborhood) == arr2D
     
-    # Create a mask to discard low-energy background noise
-    background = (arr2D == 0)
-    
     # Thresholding based on percentile to be robust across different audio volumes
     threshold = np.percentile(arr2D, MIN_AMPLITUDE_PERCENTILE)
     threshold_mask = arr2D > threshold
     
-    # Get the peaks
-    peaks_mask = local_max & ~background & threshold_mask
+    # Get the peaks (no need for background mask with dB spectrogram — silence is already very negative)
+    peaks_mask = local_max & threshold_mask
     
     # Get coordinates of peaks (freq_idx, time_idx)
     frequencies, times = np.where(peaks_mask)
