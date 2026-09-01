@@ -89,29 +89,38 @@ def generate_hashes(peaks):
     for i in range(len(peaks)):
         anchor = peaks[i]
         
-        # Look ahead up to FAN_VALUE targets within the target window
-        for j in range(1, FAN_VALUE + 1):
-            if (i + j) < len(peaks):
-                target = peaks[i + j]
+        # Scan forward to find targets IN the target zone
+        targets_found = 0
+        j = 1
+        
+        while (i + j) < len(peaks) and targets_found < FAN_VALUE:
+            target = peaks[i + j]
+            t_delta = target[0] - anchor[0]
+            
+            # If we've passed the max delta, stop looking for this anchor
+            if t_delta > MAX_HASH_TIME_DELTA:
+                break
                 
-                t_delta = target[0] - anchor[0]
+            # Check if target is within the valid time delta zone
+            if t_delta >= MIN_HASH_TIME_DELTA:
+                anchor_freq = anchor[1]
+                target_freq = target[1]
                 
-                # Check if target is within the valid time delta zone
-                if MIN_HASH_TIME_DELTA <= t_delta <= MAX_HASH_TIME_DELTA:
-                    anchor_freq = anchor[1]
-                    target_freq = target[1]
-                    
-                    # Generate a robust 32-bit hash string using SHA1
-                    # [Anchor Frequency, Target Frequency, Delta Time]
-                    hash_input = f"{anchor_freq}|{target_freq}|{t_delta}"
-                    hash_obj = hashlib.sha1(hash_input.encode('utf-8'))
-                    
-                    # Take the first 8 hex characters (32 bits)
-                    hash_value = hash_obj.hexdigest()[:8]
-                    
-                    # Track absolute time offset of anchor (in frames)
-                    offset = anchor[0]
-                    hashes.append((hash_value, offset))
+                # Generate a robust 32-bit hash string using SHA1
+                # [Anchor Frequency, Target Frequency, Delta Time]
+                hash_input = f"{anchor_freq}|{target_freq}|{t_delta}"
+                hash_obj = hashlib.sha1(hash_input.encode('utf-8'))
+                
+                # Take the first 8 hex characters (32 bits)
+                hash_value = hash_obj.hexdigest()[:8]
+                
+                # Track absolute time offset of anchor (in frames)
+                offset = anchor[0]
+                hashes.append((hash_value, offset))
+                
+                targets_found += 1
+                
+            j += 1
                     
     return hashes
 

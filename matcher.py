@@ -90,11 +90,11 @@ async def match_audio_snippet(file_path: str):
     
     if len(top_3) > 0:
         best_peak_count = top_3[0]["peak_count"]
-        second_best_peak_count = top_3[1]["peak_count"] if len(top_3) > 1 else 0
         
         # Absolute confidence threshold — need at least 5 aligned hits
-        # Relative confidence check — best must be at least 2x the runner-up
-        if best_peak_count >= 5 and (second_best_peak_count == 0 or best_peak_count >= (second_best_peak_count * 2)):
+        # We require at least 15 coherent hits to declare a definitive match.
+        # This completely eliminates false positives from random noise alignment.
+        if best_peak_count >= 15:
             is_match = True
             
     # 5. Fetch song metadata from PostgreSQL for the top 3
