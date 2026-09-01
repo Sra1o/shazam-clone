@@ -238,6 +238,93 @@ h1 {
   line-height: 1.5;
 }
 
+.top-matches-container {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  text-align: left;
+}
+
+.top-matches-header {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #8c9bb4;
+  margin-bottom: 1rem;
+  font-weight: 600;
+}
+
+.top-match-item {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+  transition: all 0.2s ease;
+}
+
+.top-match-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.top-match-rank {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #4facfe;
+  width: 28px;
+}
+
+.top-match-cover {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  object-fit: cover;
+  margin-right: 1rem;
+}
+
+.top-match-cover-placeholder {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  margin-right: 1rem;
+}
+
+.top-match-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.top-match-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.top-match-artist {
+  font-size: 0.8rem;
+  color: #8c9bb4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.top-match-confidence {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #00f2fe;
+  background: rgba(0, 242, 254, 0.1);
+  padding: 0.25rem 0.6rem;
+  border-radius: 12px;
+  margin-left: 0.5rem;
+}
+
 .animate-spin {
   animation: spin 1s linear infinite;
 }

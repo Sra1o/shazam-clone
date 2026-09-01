@@ -55,11 +55,8 @@ async def match_audio_snippet(file_path: str):
             bucketed_delta = round(delta * 4) / 4
             song_delta_counts[song_id][bucketed_delta] += 1
             
-    # 4. Find the best and second-best matches
-    best_song_id = None
-    best_peak_count = 0
-    best_delta = 0
-    second_best_peak_count = 0
+    # 4. Find the best matches
+    scored_songs = []
     
     for song_id, delta_histogram in song_delta_counts.items():
         if not delta_histogram:
@@ -68,41 +65,55 @@ async def match_audio_snippet(file_path: str):
         max_delta = max(delta_histogram, key=delta_histogram.get)
         peak_count = delta_histogram[max_delta]
         
-        if peak_count > best_peak_count:
-            # Demote the current best to second-best
-            second_best_peak_count = best_peak_count
-            best_peak_count = peak_count
-            best_song_id = song_id
-            best_delta = max_delta
-        elif peak_count > second_best_peak_count:
-            second_best_peak_count = peak_count
-            
-    # Absolute confidence threshold — need at least 8 aligned hits (was 3)
-    if best_peak_count < 8:
-        return None
+        scored_songs.append({
+            "song_id": song_id,
+            "peak_count": peak_count,
+            "time_offset": max_delta
+        })
+        
+    # Sort by highest peak count
+    scored_songs.sort(key=lambda x: x["peak_count"], reverse=True)
+    top_3 = scored_songs[:3]
     
-    # Relative confidence check — best must be at least 2x the runner-up
-    # This prevents false positives when random collisions spread evenly across songs
-    if second_best_peak_count > 0 and best_peak_count < (second_best_peak_count * 2):
-        return None
+    is_match = False
+    best_match_data = None
+    
+    if len(top_3) > 0:
+        best_peak_count = top_3[0]["peak_count"]
+        second_best_peak_count = top_3[1]["peak_count"] if len(top_3) > 1 else 0
         
-    # 5. Fetch song metadata from PostgreSQL
-    if best_song_id:
-        async with pool.acquire() as conn:
-            song_doc = await conn.fetchrow(
-                "SELECT title, artist, album, cover_art_url FROM songs WHERE id = $1::uuid",
-                best_song_id
-            )
+        # Absolute confidence threshold — need at least 5 aligned hits
+        # Relative confidence check — best must be at least 2x the runner-up
+        if best_peak_count >= 5 and (second_best_peak_count == 0 or best_peak_count >= (second_best_peak_count * 2)):
+            is_match = True
             
-            if song_doc:
-                return {
-                    "song_id": best_song_id,
-                    "title": song_doc['title'],
-                    "artist": song_doc['artist'],
-                    "album": song_doc['album'],
-                    "cover_art_url": song_doc['cover_art_url'],
-                    "confidence": best_peak_count,
-                    "time_offset": best_delta
-                }
+    # 5. Fetch song metadata from PostgreSQL for the top 3
+    top_matches_metadata = []
+    
+    if top_3:
+        async with pool.acquire() as conn:
+            for s in top_3:
+                doc = await conn.fetchrow(
+                    "SELECT title, artist, album, cover_art_url FROM songs WHERE id = $1::uuid",
+                    s["song_id"]
+                )
+                
+                if doc:
+                    top_matches_metadata.append({
+                        "song_id": s["song_id"],
+                        "title": doc['title'],
+                        "artist": doc['artist'],
+                        "album": doc['album'],
+                        "cover_art_url": doc['cover_art_url'],
+                        "confidence": s["peak_count"],
+                        "time_offset": s["time_offset"]
+                    })
+                    
+    if is_match and top_matches_metadata:
+        best_match_data = top_matches_metadata[0]
         
-    return None
+    return {
+        "is_match": is_match,
+        "match": best_match_data,
+        "top_matches": top_matches_metadata
+    }

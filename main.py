@@ -109,15 +109,17 @@ async def identify_endpoint(file: UploadFile = File(...)):
         
     os.remove(temp_path)
     
-    if match_result:
+    if match_result and match_result.get("is_match"):
         return {
             "status": "success",
-            "match": match_result
+            "match": match_result["match"],
+            "top_matches": match_result["top_matches"]
         }
     else:
         return {
             "status": "not_found",
-            "message": "No matching song found."
+            "message": "No definitive matching song found.",
+            "top_matches": match_result["top_matches"] if match_result else []
         }
 
 if __name__ == "__main__":

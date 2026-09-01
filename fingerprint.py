@@ -7,11 +7,11 @@ import hashlib
 DEFAULT_FS = 22050
 WINDOW_SIZE = 4096
 OVERLAP_RATIO = 0.5
-FAN_VALUE = 10 # Max number of targets per anchor (reduced from 15 for fewer collisions)
+FAN_VALUE = 15 # Restored to 15 to ensure enough hashes are generated despite noise
 MIN_HASH_TIME_DELTA = 0
-MAX_HASH_TIME_DELTA = 100 # Target window length in frames (tightened from 200)
-PEAK_NEIGHBORHOOD_SIZE = 35 # Size of the neighborhood for the 2D max filter (increased from 20)
-MIN_AMPLITUDE_PERCENTILE = 90 # Minimum amplitude percentile for a peak (raised from 75)
+MAX_HASH_TIME_DELTA = 100 # Keep at 100 for time precision
+PEAK_NEIGHBORHOOD_SIZE = 20 # Restored to 20 to allow more peaks (vital for short mic recordings)
+MIN_AMPLITUDE_PERCENTILE = 80 # Lowered from 90 to 80 to keep more peaks, ensuring robustness to noise
 
 def generate_spectrogram(audio_path, sr=DEFAULT_FS):
     """

@@ -5,8 +5,10 @@ function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [result, setResult] = useState<any>(null);
+  const [topMatches, setTopMatches] = useState<any[]>([]);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastRecordingUrl, setLastRecordingUrl] = useState<string | null>(null);
   
   // Spotify Ingestion State
   const [spotifyUrl, setSpotifyUrl] = useState('');
@@ -19,8 +21,13 @@ function App() {
   const startRecording = async () => {
     try {
       setResult(null);
+      setTopMatches([]);
       setNotFound(false);
       setError(null);
+      if (lastRecordingUrl) {
+        URL.revokeObjectURL(lastRecordingUrl);
+        setLastRecordingUrl(null);
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
@@ -35,6 +42,10 @@ function App() {
       mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         
+        // Save the URL for playback
+        const url = URL.createObjectURL(audioBlob);
+        setLastRecordingUrl(url);
+
         // Stop all tracks immediately to release microphone
         stream.getTracks().forEach(track => track.stop());
         
@@ -89,8 +100,10 @@ function App() {
       
       if (data.status === 'success') {
         setResult(data.match);
+        setTopMatches(data.top_matches || []);
       } else {
         setNotFound(true);
+        setTopMatches(data.top_matches || []);
       }
     } catch (err: any) {
       console.error(err);
@@ -180,6 +193,34 @@ function App() {
           </div>
           <div className="not-found-title">Song not recognized</div>
           <div className="not-found-subtitle">Try recording a louder or clearer snippet, or add the song using a Spotify link below.</div>
+          
+          {lastRecordingUrl && (
+            <div style={{ marginTop: '1.5rem', marginBottom: '1.5rem' }}>
+              <div style={{ fontSize: '0.85rem', color: '#8c9bb4', marginBottom: '0.5rem' }}>Listen to your recording:</div>
+              <audio src={lastRecordingUrl} controls style={{ width: '100%', height: '36px' }} />
+            </div>
+          )}
+
+          {topMatches.length > 0 && (
+            <div className="top-matches-container">
+              <div className="top-matches-header">Closest Partial Matches:</div>
+              {topMatches.map((match, i) => (
+                <div key={match.song_id} className="top-match-item">
+                  <span className="top-match-rank">#{i + 1}</span>
+                  {match.cover_art_url ? (
+                    <img src={match.cover_art_url} alt="Cover" className="top-match-cover" />
+                  ) : (
+                    <div className="top-match-cover-placeholder" />
+                  )}
+                  <div className="top-match-info">
+                    <div className="top-match-title">{match.title}</div>
+                    <div className="top-match-artist">{match.artist}</div>
+                  </div>
+                  <div className="top-match-confidence">{match.confidence} hits</div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
