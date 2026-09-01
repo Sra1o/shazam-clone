@@ -39,12 +39,14 @@ async def process_single_track(sp, track_info):
                 print(f"Skipping '{title}' by {artist}: Already exists in database.")
                 return
         
-        search_query = f"{artist} - {title} official audio"
+        yt_query = f"{artist} - {title} official audio"
+        sc_query = f"{artist} {title}" # SoundCloud search works better without "official audio"
         
         ydl_opts = {
             'format': 'bestaudio/best',
             'noplaylist': True,
             'quiet': True,
+            'extractor_args': {'youtube': ['client=ANDROID_MUSIC,ANDROID,WEB_CREATOR']}, # Bypasses most YouTube bot checks
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'wav',
@@ -56,16 +58,19 @@ async def process_single_track(sp, track_info):
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 try:
-                    info = await asyncio.to_thread(ydl.extract_info, f"ytsearch1:{search_query}", download=True)
+                    info = await asyncio.to_thread(ydl.extract_info, f"ytsearch1:{yt_query}", download=True)
                 except Exception as e:
-                    print(f"YouTube blocked the request (Bot Check). Falling back to SoundCloud...")
-                    # Fallback to SoundCloud search which rarely blocks datacenter IPs
-                    info = await asyncio.to_thread(ydl.extract_info, f"scsearch1:{search_query}", download=True)
+                    print(f"YouTube block detected. Trying YouTube Music...")
+                    try:
+                        info = await asyncio.to_thread(ydl.extract_info, f"ytmsearch1:{yt_query}", download=True)
+                    except Exception as e2:
+                        print(f"YouTube Music blocked. Falling back to SoundCloud...")
+                        info = await asyncio.to_thread(ydl.extract_info, f"scsearch1:{sc_query}", download=True)
                 
                 if 'entries' in info and len(info['entries']) > 0:
                     downloaded_file = os.path.join(tmpdirname, 'download.wav')
                 else:
-                    print(f"Skipping {title}: Could not find on YouTube.")
+                    print(f"Skipping '{title}': Could not find any audio on YouTube or SoundCloud.")
                     return
                     
             metadata = SongMetadata(title=title, artist=artist, album=album, duration=duration)
