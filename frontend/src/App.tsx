@@ -248,6 +248,13 @@ function App() {
               {result.album && <div className="song-album">{result.album}</div>}
             </div>
           </div>
+          
+          {lastRecordingUrl && (
+            <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
+              <div style={{ fontSize: '0.85rem', color: '#8c9bb4', marginBottom: '0.5rem' }}>Listen to your recording:</div>
+              <audio src={lastRecordingUrl} controls style={{ width: '100%', height: '36px' }} />
+            </div>
+          )}
         </div>
       )}
 

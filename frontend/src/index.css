@@ -26,7 +26,8 @@ body {
   min-width: 320px;
   min-height: 100vh;
   background: radial-gradient(circle at 50% -20%, #2a2d4f, #0d0f1a 70%);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 #root {
