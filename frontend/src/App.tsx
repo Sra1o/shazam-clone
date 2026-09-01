@@ -7,6 +7,11 @@ function App() {
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   
+  // Spotify Ingestion State
+  const [spotifyUrl, setSpotifyUrl] = useState('');
+  const [ingestStatus, setIngestStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [ingestMessage, setIngestMessage] = useState('');
+  
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<BlobPart[]>([]);
 
@@ -93,6 +98,41 @@ function App() {
     }
   };
 
+  const handleSpotifyIngest = async () => {
+    if (!spotifyUrl) return;
+    setIngestStatus('loading');
+    setIngestMessage('');
+
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${apiUrl}/ingest/spotify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: spotifyUrl }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.detail || 'Failed to start ingestion');
+      }
+
+      setIngestStatus('success');
+      setIngestMessage(data.message);
+      setSpotifyUrl('');
+      
+      // Clear success message after 5 seconds
+      setTimeout(() => {
+        setIngestStatus('idle');
+        setIngestMessage('');
+      }, 5000);
+      
+    } catch (err: any) {
+      setIngestStatus('error');
+      setIngestMessage(err.message);
+    }
+  };
+
   return (
     <div className="app-container">
       <div>
@@ -133,6 +173,34 @@ function App() {
           {result.album && <div className="song-album">{result.album}</div>}
         </div>
       )}
+
+      {/* Spotify Ingestion Section */}
+      <div className="spotify-ingest-container">
+        <div className="spotify-input-wrapper">
+          <input
+            type="text"
+            className="spotify-input"
+            placeholder="Paste Spotify Track or Playlist link..."
+            value={spotifyUrl}
+            onChange={(e) => setSpotifyUrl(e.target.value)}
+            disabled={ingestStatus === 'loading'}
+          />
+          <button 
+            className="spotify-btn" 
+            onClick={handleSpotifyIngest}
+            disabled={!spotifyUrl || ingestStatus === 'loading'}
+          >
+            {ingestStatus === 'loading' ? <Loader2 className="animate-spin" size={20} /> : 'Add'}
+          </button>
+        </div>
+        
+        {ingestMessage && (
+          <div className={`ingest-message ${ingestStatus}`}>
+            {ingestMessage}
+          </div>
+        )}
+      </div>
+
     </div>
   );
 }
