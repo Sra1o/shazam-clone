@@ -24,6 +24,9 @@ def get_spotify_client():
     )
     return spotipy.Spotify(auth_manager=auth_manager)
 
+def _download_file(url, path):
+    urllib.request.urlretrieve(url, path)
+
 async def ingest_from_spotify_url(url: str):
     """
     Given a Spotify Track URL, fetches metadata, downloads audio via YouTube/SoundCloud,
@@ -34,7 +37,7 @@ async def ingest_from_spotify_url(url: str):
         
     try:
         sp = get_spotify_client()
-        track_info = sp.track(url)
+        track_info = await asyncio.to_thread(sp.track, url)
         
         title = track_info['name']
         artist = track_info['artists'][0]['name']
@@ -62,7 +65,7 @@ async def ingest_from_spotify_url(url: str):
             if preview_url:
                 print(f"Found Spotify preview URL! Downloading directly from Spotify servers...", flush=True)
                 downloaded_file = os.path.join(tmpdirname, 'preview.mp3')
-                await asyncio.to_thread(urllib.request.urlretrieve, preview_url, downloaded_file)
+                await asyncio.to_thread(_download_file, preview_url, downloaded_file)
                 
             else:
                 print(f"No Spotify preview available. Bypassing DRM by fetching audio from Apple iTunes...", flush=True)

@@ -1,4 +1,5 @@
 import uuid
+import asyncio
 from db import get_db_pool, SongMetadata
 from fingerprint import fingerprint_audio
 
@@ -8,8 +9,8 @@ async def ingest_audio_file(file_path: str, metadata: SongMetadata):
     Uses ON CONFLICT to gracefully handle race conditions where two concurrent
     requests try to insert the same song.
     """
-    # 1. Fingerprint the audio
-    hashes = fingerprint_audio(file_path)
+    # 1. Fingerprint the audio (CPU heavy, run in thread pool)
+    hashes = await asyncio.to_thread(fingerprint_audio, file_path)
     
     if not hashes:
         raise ValueError("No hashes generated for audio file.")

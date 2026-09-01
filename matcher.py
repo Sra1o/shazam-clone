@@ -1,3 +1,4 @@
+import asyncio
 from collections import defaultdict
 from db import get_db_pool
 from fingerprint import fingerprint_audio
@@ -8,8 +9,8 @@ async def match_audio_snippet(file_path: str):
     aligns the offsets, and finds the best matching song.
     Uses relative confidence scoring to avoid false positives at scale.
     """
-    # 1. Fingerprint the query audio
-    query_hashes = fingerprint_audio(file_path)
+    # 1. Fingerprint the query audio (CPU heavy, run in thread pool)
+    query_hashes = await asyncio.to_thread(fingerprint_audio, file_path)
     
     if not query_hashes:
         return None
