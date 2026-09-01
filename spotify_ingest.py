@@ -14,15 +14,26 @@ SPOTIPY_CLIENT_SECRET = os.environ.get("SPOTIPY_CLIENT_SECRET", "")
 def get_spotify_client():
     if not SPOTIPY_CLIENT_ID or not SPOTIPY_CLIENT_SECRET:
         raise ValueError("Spotify API credentials (SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET) are not set in the environment.")
+    
+    # Simple Client Credentials since we are only doing single tracks (no playlists, no 401 errors!)
     auth_manager = SpotifyClientCredentials(
         client_id=SPOTIPY_CLIENT_ID, 
         client_secret=SPOTIPY_CLIENT_SECRET
     )
     return spotipy.Spotify(auth_manager=auth_manager)
 
-async def process_single_track(sp, track_info):
-    """Processes a single Spotify track dictionary."""
+async def ingest_from_spotify_url(url: str):
+    """
+    Given a Spotify Track URL, fetches metadata, downloads audio via YouTube/SoundCloud,
+    and ingests it into our database.
+    """
+    if "playlist" in url:
+        raise ValueError("Playlists are not supported. Please provide a single Spotify Track URL.")
+        
     try:
+        sp = get_spotify_client()
+        track_info = sp.track(url)
+        
         title = track_info['name']
         artist = track_info['artists'][0]['name']
         album = track_info['album']['name']
@@ -37,16 +48,18 @@ async def process_single_track(sp, track_info):
             )
             if existing:
                 print(f"Skipping '{title}' by {artist}: Already exists in database.", flush=True)
-                return
+                return existing['id'], 0, SongMetadata(title=title, artist=artist, album=album, duration=duration)
         
-        yt_query = f"{artist} - {title} official audio"
-        sc_query = f"{artist} {title}" # SoundCloud search works better without "official audio"
+        # We search exactly what we need
+        yt_query = f"{artist} - {title} audio"
+        sc_query = f"{artist} {title}"
         
         ydl_opts = {
             'format': 'bestaudio/best',
             'noplaylist': True,
             'quiet': True,
-            'extractor_args': {'youtube': ['client=ANDROID_MUSIC,ANDROID,WEB_CREATOR']}, # Bypasses most YouTube bot checks
+            # 'ANDROID' without 'ANDROID_MUSIC' bypasses bot checks without triggering Music DRM!
+            'extractor_args': {'youtube': ['client=ANDROID,IOS,WEB']},
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'wav',
@@ -60,58 +73,20 @@ async def process_single_track(sp, track_info):
                 try:
                     info = await asyncio.to_thread(ydl.extract_info, f"ytsearch1:{yt_query}", download=True)
                 except Exception as e:
-                    print(f"YouTube block detected. Trying YouTube Music...", flush=True)
-                    try:
-                        info = await asyncio.to_thread(ydl.extract_info, f"ytmsearch1:{yt_query}", download=True)
-                    except Exception as e2:
-                        print(f"YouTube Music blocked. Falling back to SoundCloud...", flush=True)
-                        info = await asyncio.to_thread(ydl.extract_info, f"scsearch1:{sc_query}", download=True)
+                    print(f"YouTube threw an error (Bot/DRM). Falling back to SoundCloud...", flush=True)
+                    info = await asyncio.to_thread(ydl.extract_info, f"scsearch1:{sc_query}", download=True)
                 
                 if 'entries' in info and len(info['entries']) > 0:
                     downloaded_file = os.path.join(tmpdirname, 'download.wav')
                 else:
-                    print(f"Skipping '{title}': Could not find any audio on YouTube or SoundCloud.", flush=True)
-                    return
+                    raise ValueError(f"Could not find any audio on YouTube or SoundCloud for '{title}'.")
                     
             metadata = SongMetadata(title=title, artist=artist, album=album, duration=duration)
-            await ingest_audio_file(downloaded_file, metadata)
+            song_id, num_hashes = await ingest_audio_file(downloaded_file, metadata)
             print(f"Successfully ingested: {title} by {artist}", flush=True)
             
-    except Exception as e:
-        print(f"Error processing track {track_info.get('name', 'Unknown')}: {e}", flush=True)
-
-async def ingest_from_spotify_url(url: str):
-    """
-    Given a Spotify Track or Playlist URL, fetches metadata, downloads audio via YouTube,
-    and ingests it into our database. Designed to be run as a background task.
-    """
-    try:
-        sp = get_spotify_client()
-        
-        if "playlist" in url:
-            # It's a playlist
-            results = sp.playlist_tracks(url)
-            tracks = results['items']
-            
-            # Fetch all pages if playlist is longer than 100 songs
-            while results['next']:
-                results = sp.next(results)
-                tracks.extend(results['items'])
-                
-            print(f"Starting ingestion of {len(tracks)} tracks from playlist...", flush=True)
-            
-            for item in tracks:
-                track_info = item['track']
-                if track_info:
-                    await process_single_track(sp, track_info)
-                    
-        elif "track" in url:
-            # It's a single track
-            track_info = sp.track(url)
-            await process_single_track(sp, track_info)
-            
-        else:
-            print("Invalid URL format. Must be a Spotify track or playlist link.", flush=True)
+            return song_id, num_hashes, metadata
             
     except Exception as e:
         print(f"Critical error in Spotify ingestion task: {e}", flush=True)
+        raise e
