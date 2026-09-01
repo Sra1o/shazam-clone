@@ -26,6 +26,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/")
+async def root():
+    return {"status": "ok", "message": "Shazam Clone API is running"}
+
 @app.post("/ingest")
 async def ingest_endpoint(
     file: UploadFile = File(...),
