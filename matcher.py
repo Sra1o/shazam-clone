@@ -31,8 +31,13 @@ async def match_audio_snippet(file_path: str):
         records = await conn.fetch(
             """
             SELECT hash_value, song_id, time_offset 
-            FROM hashes 
-            WHERE hash_value = ANY($1)
+            FROM (
+                SELECT hash_value, song_id, time_offset,
+                       count(*) OVER (PARTITION BY hash_value) as hash_freq
+                FROM hashes 
+                WHERE hash_value = ANY($1)
+            ) sub
+            WHERE hash_freq <= 100
             """,
             unique_hashes
         )
