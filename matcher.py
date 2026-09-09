@@ -31,13 +31,8 @@ async def match_audio_snippet(file_path: str):
         records = await conn.fetch(
             """
             SELECT hash_value, song_id, time_offset 
-            FROM (
-                SELECT hash_value, song_id, time_offset,
-                       count(*) OVER (PARTITION BY hash_value) as hash_freq
-                FROM hashes 
-                WHERE hash_value = ANY($1)
-            ) sub
-            WHERE hash_freq <= 100
+            FROM hashes 
+            WHERE hash_value = ANY($1)
             """,
             unique_hashes
         )
@@ -46,7 +41,10 @@ async def match_audio_snippet(file_path: str):
         return None
         
     # 3. Calculate Deltas
-    song_delta_counts = defaultdict(lambda: defaultdict(int))
+    # Use sets to count UNIQUE hashes that align at a specific time delta.
+    # This completely eliminates the "common hash" problem where a single repeating
+    # noise/silence hash artificially inflates the hit count.
+    song_delta_hashes = defaultdict(lambda: defaultdict(set))
     
     for record in records:
         db_hash = record['hash_value']
@@ -56,29 +54,25 @@ async def match_audio_snippet(file_path: str):
         query_offsets = hash_to_query_offsets[db_hash]
         
         for q_offset in query_offsets:
-            # We now keep the delta in integer frames (or very close to it since we changed to seconds)
-            # Wait, fingerprint.py still returns offsets in seconds! Let's convert back to frames for integer bucketing, 
-            # or just bucket by rounding to the nearest 0.05s which is roughly 1 frame.
-            # 1 frame at 11025Hz with 2048 window (50% overlap) = 1024 samples / 11025 Hz = 0.0928 seconds
             delta = db_offset - q_offset
             
             # Bucket to nearest frame (approx 0.093s). We divide by 0.093 to get the frame index.
             frame_delta = int(round(delta / 0.0928798))
             
             # Fuzzy match: add to the exact frame, and adjacent frames to handle jitter
-            song_delta_counts[song_id][frame_delta] += 1
-            song_delta_counts[song_id][frame_delta - 1] += 1
-            song_delta_counts[song_id][frame_delta + 1] += 1
+            song_delta_hashes[song_id][frame_delta].add(db_hash)
+            song_delta_hashes[song_id][frame_delta - 1].add(db_hash)
+            song_delta_hashes[song_id][frame_delta + 1].add(db_hash)
             
     # 4. Find the best matches
     scored_songs = []
     
-    for song_id, delta_histogram in song_delta_counts.items():
+    for song_id, delta_histogram in song_delta_hashes.items():
         if not delta_histogram:
             continue
             
-        max_delta = max(delta_histogram, key=delta_histogram.get)
-        peak_count = delta_histogram[max_delta]
+        max_delta = max(delta_histogram, key=lambda k: len(delta_histogram[k]))
+        peak_count = len(delta_histogram[max_delta])
         
         scored_songs.append({
             "song_id": song_id,
