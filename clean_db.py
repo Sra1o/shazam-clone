@@ -63,9 +63,43 @@ async def wipe_for_reingestion():
     print("All songs and hashes deleted. You can now re-ingest with the improved algorithm.")
     await conn.close()
 
+async def delete_song(title: str):
+    """Delete a specific song and all its hashes by title."""
+    print(f"Connecting to {DATABASE_URL}...")
+    conn = await asyncpg.connect(DATABASE_URL)
+    
+    # Check if the song exists
+    songs = await conn.fetch("SELECT id, title, artist FROM songs WHERE title ILIKE $1", f"%{title}%")
+    if not songs:
+        print(f"No song found matching title '{title}'.")
+        await conn.close()
+        return
+        
+    print(f"Found {len(songs)} song(s) matching '{title}':")
+    for s in songs:
+        print(f" - {s['title']} by {s['artist']} (ID: {s['id']})")
+        
+    confirm = input(f"Type 'yes' to delete these songs and all their hashes: ")
+    if confirm.strip().lower() != 'yes':
+        print("Aborted.")
+        await conn.close()
+        return
+        
+    for s in songs:
+        await conn.execute("DELETE FROM songs WHERE id = $1", s['id'])
+        print(f"Deleted '{s['title']}'. (Hashes deleted automatically via CASCADE).")
+        
+    await conn.close()
+
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "--wipe":
-        asyncio.run(wipe_for_reingestion())
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "--wipe":
+            asyncio.run(wipe_for_reingestion())
+        elif sys.argv[1] == "--delete" and len(sys.argv) > 2:
+            asyncio.run(delete_song(sys.argv[2]))
+        else:
+            print("Usage: python clean_db.py [--wipe] [--delete \"song title\"]")
     else:
         asyncio.run(clean_duplicates())
         print("\nTip: Run with --wipe to delete ALL songs and hashes for a fresh re-ingestion.")
+        print("Tip: Run with --delete \"song title\" to delete a specific song.")

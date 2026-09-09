@@ -40,11 +40,12 @@ async def match_audio_snippet(file_path: str):
     if not records:
         return None
         
+    if not records:
+        return None
+        
     # 3. Calculate Deltas
-    # Use sets to count UNIQUE hashes that align at a specific time delta.
-    # This completely eliminates the "common hash" problem where a single repeating
-    # noise/silence hash artificially inflates the hit count.
-    song_delta_hashes = defaultdict(lambda: defaultdict(set))
+    # Use raw counts to accurately capture sequential acoustic events
+    song_delta_counts = defaultdict(lambda: defaultdict(int))
     
     for record in records:
         db_hash = record['hash_value']
@@ -60,45 +61,53 @@ async def match_audio_snippet(file_path: str):
             frame_delta = int(round(delta / 0.0928798))
             
             # Fuzzy match: add to the exact frame, and adjacent frames to handle jitter
-            song_delta_hashes[song_id][frame_delta].add(db_hash)
-            song_delta_hashes[song_id][frame_delta - 1].add(db_hash)
-            song_delta_hashes[song_id][frame_delta + 1].add(db_hash)
+            song_delta_counts[song_id][frame_delta] += 1
+            song_delta_counts[song_id][frame_delta - 1] += 1
+            song_delta_counts[song_id][frame_delta + 1] += 1
             
     # 4. Find the best matches
     scored_songs = []
     
-    for song_id, delta_histogram in song_delta_hashes.items():
+    for song_id, delta_histogram in song_delta_counts.items():
         if not delta_histogram:
             continue
             
-        max_delta = max(delta_histogram, key=lambda k: len(delta_histogram[k]))
-        peak_count = len(delta_histogram[max_delta])
+        max_delta = max(delta_histogram, key=delta_histogram.get)
+        peak_count = delta_histogram[max_delta]
+        
+        # Calculate the noise floor (average hit count across all populated buckets)
+        values = list(delta_histogram.values())
+        avg_count = sum(values) / len(values) if values else 0
+        
+        # True Score = Peak - Noise Floor
+        # Legitimate matches have a sharp peak and a near-zero noise floor.
+        # Noise bombs have a high peak but a massively high noise floor across all buckets.
+        score = peak_count - avg_count
         
         scored_songs.append({
             "song_id": song_id,
             "peak_count": peak_count,
+            "score": score,
             "time_offset": max_delta
         })
         
-    # Sort by highest peak count
-    scored_songs.sort(key=lambda x: x["peak_count"], reverse=True)
+    # Sort by highest score
+    scored_songs.sort(key=lambda x: x["score"], reverse=True)
     top_3 = scored_songs[:3]
     
     is_match = False
     best_match_data = None
     
     if len(top_3) > 0:
-        best_peak_count = top_3[0]["peak_count"]
-        second_peak_count = top_3[1]["peak_count"] if len(top_3) > 1 else 0
+        best_score = top_3[0]["score"]
+        second_score = top_3[1]["score"] if len(top_3) > 1 else 0
         
-        # Absolute confidence threshold
-        # We require at least 15 coherent hits to declare a definitive match.
-        if best_peak_count >= 15:
+        # Absolute confidence threshold based on SCORE
+        # A true score (Peak - Avg) of 10 is very definitive
+        if best_score >= 10:
             is_match = True
         # Relative confidence threshold
-        # If the best match has fewer hits (e.g. 10-14) but is significantly
-        # higher than the second best match, we can still declare a match.
-        elif best_peak_count >= 10 and (second_peak_count == 0 or best_peak_count >= second_peak_count * 2):
+        elif best_score >= 5 and (second_score == 0 or best_score >= second_score * 2):
             is_match = True
             
     # 5. Fetch song metadata from PostgreSQL for the top 3
@@ -119,7 +128,7 @@ async def match_audio_snippet(file_path: str):
                         "artist": doc['artist'],
                         "album": doc['album'],
                         "cover_art_url": doc['cover_art_url'],
-                        "confidence": s["peak_count"],
+                        "confidence": int(s["score"]),
                         "time_offset": s["time_offset"]
                     })
                     
