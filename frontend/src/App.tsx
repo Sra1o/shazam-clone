@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { Mic, Square, Loader2 } from 'lucide-react';
+import { Mic, Square, Loader2, Upload } from 'lucide-react';
 
 function App() {
   const [isRecording, setIsRecording] = useState(false);
@@ -17,6 +17,7 @@ function App() {
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<BlobPart[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const startRecording = async () => {
     try {
@@ -119,6 +120,29 @@ function App() {
     }
   };
 
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    
+    // Reset state
+    setResult(null);
+    setTopMatches([]);
+    setNotFound(false);
+    setError(null);
+    if (lastRecordingUrl) {
+      URL.revokeObjectURL(lastRecordingUrl);
+      setLastRecordingUrl(null);
+    }
+    
+    setIsProcessing(true);
+    await sendAudioToAPI(file);
+    
+    // Clear input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   const handleSpotifyIngest = async () => {
     if (!spotifyUrl) return;
     setIngestStatus('loading');
@@ -179,6 +203,24 @@ function App() {
         {isRecording && "Listening... (auto-stops in 8s)"}
         {isProcessing && "Identifying..."}
         {!isRecording && !isProcessing && "Tap to listen"}
+      </div>
+
+      <div className="upload-container">
+        <input 
+          type="file" 
+          ref={fileInputRef} 
+          onChange={handleFileUpload} 
+          accept="audio/*" 
+          style={{ display: 'none' }} 
+        />
+        <button 
+          className="upload-button" 
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isProcessing || isRecording}
+        >
+          <Upload size={18} />
+          <span>Upload Audio File</span>
+        </button>
       </div>
 
       {error && (

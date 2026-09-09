@@ -1,5 +1,4 @@
 import asyncio
-import math
 from collections import defaultdict
 from db import get_db_pool
 from fingerprint import fingerprint_audio
@@ -8,7 +7,7 @@ async def match_audio_snippet(file_path: str):
     """
     Fingerprints a query audio file, searches PostgreSQL for matches,
     aligns the offsets, and finds the best matching song.
-    Uses IDF weighting to remain accurate as the database scales.
+    Uses Noise Floor Subtraction to remain accurate as the database scales.
     """
     # 1. Fingerprint the query audio (CPU heavy, run in thread pool)
     query_hashes = await asyncio.to_thread(fingerprint_audio, file_path)
@@ -41,29 +40,15 @@ async def match_audio_snippet(file_path: str):
     if not records:
         return None
     
-    # 3. Calculate IDF weights for each hash
-    # Count how many distinct songs each hash appears in
-    hash_song_count = defaultdict(set)
-    for record in records:
-        hash_song_count[record['hash_value']].add(str(record['song_id']))
-    
-    # IDF weight: hashes unique to 1 song get weight 1.0,
-    # hashes in many songs get progressively less weight
-    hash_idf = {}
-    for h, songs in hash_song_count.items():
-        num_songs = len(songs)
-        # 1/n weighting: appears in 1 song = 1.0, in 5 songs = 0.2, in 20 songs = 0.05
-        hash_idf[h] = 1.0 / num_songs
-        
-    # 4. Calculate Deltas with IDF-weighted counts
-    song_delta_counts = defaultdict(lambda: defaultdict(float))
+    # 3. Calculate Deltas
+    # Use raw counts to accurately capture sequential acoustic events
+    song_delta_counts = defaultdict(lambda: defaultdict(int))
     
     for record in records:
         db_hash = record['hash_value']
         song_id = str(record['song_id'])
         db_offset = record['time_offset']
         
-        weight = hash_idf[db_hash]
         query_offsets = hash_to_query_offsets[db_hash]
         
         for q_offset in query_offsets:
@@ -73,11 +58,11 @@ async def match_audio_snippet(file_path: str):
             frame_delta = int(round(delta / 0.0928798))
             
             # Fuzzy match: add to the exact frame, and adjacent frames to handle jitter
-            song_delta_counts[song_id][frame_delta] += weight
-            song_delta_counts[song_id][frame_delta - 1] += weight
-            song_delta_counts[song_id][frame_delta + 1] += weight
+            song_delta_counts[song_id][frame_delta] += 1
+            song_delta_counts[song_id][frame_delta - 1] += 1
+            song_delta_counts[song_id][frame_delta + 1] += 1
             
-    # 5. Find the best matches
+    # 4. Find the best matches
     scored_songs = []
     
     for song_id, delta_histogram in song_delta_counts.items():
@@ -87,34 +72,42 @@ async def match_audio_snippet(file_path: str):
         max_delta = max(delta_histogram, key=delta_histogram.get)
         peak_count = delta_histogram[max_delta]
         
+        # Calculate the noise floor (average hit count across all populated buckets)
+        values = list(delta_histogram.values())
+        avg_count = sum(values) / len(values) if values else 0
+        
+        # True Score = Peak - Noise Floor
+        # Legitimate matches have a sharp peak and a near-zero noise floor.
+        # Noise bombs have a high peak but a massively high noise floor across all buckets.
+        score = peak_count - avg_count
+        
         scored_songs.append({
             "song_id": song_id,
-            "peak_count": round(peak_count, 1),
+            "peak_count": peak_count,
+            "score": score,
             "time_offset": max_delta
         })
         
-    # Sort by highest peak count
-    scored_songs.sort(key=lambda x: x["peak_count"], reverse=True)
+    # Sort by highest score
+    scored_songs.sort(key=lambda x: x["score"], reverse=True)
     top_3 = scored_songs[:3]
     
     is_match = False
     best_match_data = None
     
     if len(top_3) > 0:
-        best_peak_count = top_3[0]["peak_count"]
-        second_peak_count = top_3[1]["peak_count"] if len(top_3) > 1 else 0
+        best_score = top_3[0]["score"]
+        second_score = top_3[1]["score"] if len(top_3) > 1 else 0
         
-        # Absolute confidence threshold
-        # We require at least 10 weighted hits to declare a definitive match.
-        if best_peak_count >= 10:
+        # Absolute confidence threshold based on SCORE
+        # A true score (Peak - Avg) of 10 is very definitive
+        if best_score >= 10:
             is_match = True
         # Relative confidence threshold
-        # If the best match has fewer hits but is significantly
-        # higher than the second best match, we can still declare a match.
-        elif best_peak_count >= 5 and (second_peak_count == 0 or best_peak_count >= second_peak_count * 2):
+        elif best_score >= 5 and (second_score == 0 or best_score >= second_score * 2):
             is_match = True
             
-    # 6. Fetch song metadata from PostgreSQL for the top 3
+    # 5. Fetch song metadata from PostgreSQL for the top 3
     top_matches_metadata = []
     
     if top_3:
@@ -132,7 +125,7 @@ async def match_audio_snippet(file_path: str):
                         "artist": doc['artist'],
                         "album": doc['album'],
                         "cover_art_url": doc['cover_art_url'],
-                        "confidence": s["peak_count"],
+                        "confidence": int(s["score"]),
                         "time_offset": s["time_offset"]
                     })
                     
