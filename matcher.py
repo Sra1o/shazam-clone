@@ -75,39 +75,31 @@ async def match_audio_snippet(file_path: str):
         max_delta = max(delta_histogram, key=delta_histogram.get)
         peak_count = delta_histogram[max_delta]
         
-        # Calculate the noise floor (average hit count across all populated buckets)
-        values = list(delta_histogram.values())
-        avg_count = sum(values) / len(values) if values else 0
-        
-        # True Score = Peak - Noise Floor
-        # Legitimate matches have a sharp peak and a near-zero noise floor.
-        # Noise bombs have a high peak but a massively high noise floor across all buckets.
-        score = peak_count - avg_count
-        
         scored_songs.append({
             "song_id": song_id,
             "peak_count": peak_count,
-            "score": score,
             "time_offset": max_delta
         })
         
-    # Sort by highest score
-    scored_songs.sort(key=lambda x: x["score"], reverse=True)
+    # Sort by highest peak count
+    scored_songs.sort(key=lambda x: x["peak_count"], reverse=True)
     top_3 = scored_songs[:3]
     
     is_match = False
     best_match_data = None
     
     if len(top_3) > 0:
-        best_score = top_3[0]["score"]
-        second_score = top_3[1]["score"] if len(top_3) > 1 else 0
+        best_peak_count = top_3[0]["peak_count"]
+        second_peak_count = top_3[1]["peak_count"] if len(top_3) > 1 else 0
         
-        # Absolute confidence threshold based on SCORE
-        # A true score (Peak - Avg) of 10 is very definitive
-        if best_score >= 10:
+        # Absolute confidence threshold
+        # We require at least 15 coherent hits to declare a definitive match.
+        if best_peak_count >= 15:
             is_match = True
         # Relative confidence threshold
-        elif best_score >= 5 and (second_score == 0 or best_score >= second_score * 2):
+        # If the best match has fewer hits (e.g. 10-14) but is significantly
+        # higher than the second best match, we can still declare a match.
+        elif best_peak_count >= 10 and (second_peak_count == 0 or best_peak_count >= second_peak_count * 2):
             is_match = True
             
     # 5. Fetch song metadata from PostgreSQL for the top 3
@@ -128,7 +120,7 @@ async def match_audio_snippet(file_path: str):
                         "artist": doc['artist'],
                         "album": doc['album'],
                         "cover_art_url": doc['cover_art_url'],
-                        "confidence": int(s["score"]),
+                        "confidence": s["peak_count"],
                         "time_offset": s["time_offset"]
                     })
                     
