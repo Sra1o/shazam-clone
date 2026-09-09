@@ -111,16 +111,15 @@ def generate_hashes(peaks):
                 
             # Check if target is within the valid time delta zone
             if t_delta >= MIN_HASH_TIME_DELTA:
-                # Robust Bucketing: 
-                # Room reverb smears peaks in time, and cheap mics shift pitches slightly.
-                # By bucketing the frequencies and time delta, the hash survives minor shifts.
-                # We divide frequency bins by 2 (approx 10Hz bands) and time delta by 2.
-                anchor_freq = anchor[1] // 2
-                target_freq = target[1] // 2
-                bucketed_t_delta = t_delta // 2
+                # High-Resolution Hashing: 
+                # Use exact frequency bins and exact time frame deltas to 
+                # maximize specificity and prevent cross-contamination between similar songs.
+                anchor_freq = anchor[1]
+                target_freq = target[1]
+                exact_t_delta = t_delta
                 
                 # Generate a robust 32-bit hash string using SHA1
-                hash_input = f"{anchor_freq}|{target_freq}|{bucketed_t_delta}"
+                hash_input = f"{anchor_freq}|{target_freq}|{exact_t_delta}"
                 hash_obj = hashlib.sha1(hash_input.encode('utf-8'))
                 
                 # Take the first 8 hex characters (32 bits)
