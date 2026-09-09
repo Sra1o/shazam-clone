@@ -62,12 +62,12 @@ function App() {
       mediaRecorder.start();
       setIsRecording(true);
       
-      // Auto-stop after 8 seconds
+      // Auto-stop after 10 seconds
       setTimeout(() => {
         if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
           stopRecording();
         }
-      }, 8000);
+      }, 10000);
       
     } catch (err) {
       console.error(err);
@@ -182,7 +182,7 @@ function App() {
     <div className="app-container">
       <div>
         <h1>Shazam Clone</h1>
-        <p className="subtitle">Identify any song in seconds</p>
+        <p className="subtitle">Identify <i>almost</i> any song in seconds</p>
       </div>
 
       <button 
@@ -200,7 +200,7 @@ function App() {
       </button>
 
       <div className="status-text">
-        {isRecording && "Listening... (auto-stops in 8s)"}
+        {isRecording && "Listening... (auto-stops in 10s)"}
         {isProcessing && "Identifying..."}
         {!isRecording && !isProcessing && "Tap to listen"}
       </div>
