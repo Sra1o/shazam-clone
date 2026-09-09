@@ -57,10 +57,18 @@ def get_2D_peaks(arr2D, sr=DEFAULT_FS, n_fft=WINDOW_SIZE):
     # Apply the local maximum filter over the ENTIRE spectrogram
     local_max = maximum_filter(arr2D, footprint=neighborhood) == arr2D
     
-    # Dynamic Global Thresholding: Calculate mean across the entire array
-    mean_db = np.mean(arr2D)
-    threshold = mean_db + THRESHOLD_OFFSET_DB
-    threshold_mask = arr2D > threshold
+    # Dynamic Local Thresholding: Calculate mean across frequencies for EACH frame
+    # This makes peak detection invariant to the length of the audio file or global volume shifts
+    mean_db_per_frame = np.mean(arr2D, axis=0)
+    threshold = mean_db_per_frame + THRESHOLD_OFFSET_DB
+    
+    # Absolute Silence Floor: Ignore anything 60dB quieter than the global maximum
+    # This prevents amplifying pure background static in silent frames
+    global_max = np.max(arr2D)
+    absolute_min = global_max - 60
+    
+    # Keep peaks that beat both the local per-frame threshold and the absolute silence floor
+    threshold_mask = (arr2D > threshold) & (arr2D > absolute_min)
     
     # Ignore frequencies below 250Hz
     freq_mask = np.ones(arr2D.shape, dtype=bool)
